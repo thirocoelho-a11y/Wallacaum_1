@@ -13,11 +13,11 @@ const FLOOR_MAX = VIEW_H - 20;
 // Física
 const GRAVITY = 0.65;
 const JUMP_FORCE = 13;
-const JUMP_CUT = 0.4;        // Soltar o botão corta o pulo (variable jump)
+const JUMP_CUT = 0.4;
 const PLAYER_ACCEL = 0.55;
-const PLAYER_DECEL = 0.78;   // Friction — 1 = sem atrito, 0 = para instantâneo
+const PLAYER_DECEL = 0.78;
 const PLAYER_MAX_SPEED = 4.0;
-const COYOTE_TIME = 6;       // Frames de tolerância pra pular depois de cair
+const COYOTE_TIME = 6;
 const LAND_SQUASH_FRAMES = 6;
 
 // Combate
@@ -25,16 +25,16 @@ const PUNCH_RANGE = 85;
 const PUNCH_DEPTH = 45;
 const PUNCH_DAMAGE = 1;
 const PUNCH_DURATION = 18;
-const PUNCH_ACTIVE = [4, 12]; // Frames ativos do hitbox [start, end]
+const PUNCH_ACTIVE = [4, 12];
 const BUFA_RANGE = 170;
 const BUFA_DEPTH = 85;
 const BUFA_DAMAGE_NORMAL = 3;
 const BUFA_DAMAGE_BOSS = 5;
 const BUFA_DURATION = 50;
 const BUFA_ACTIVE_START = 12;
-const HITSTOP_FRAMES = 4;    // Freeze frame no impacto
+const HITSTOP_FRAMES = 4;
 const KNOCKBACK_DECAY = 0.82;
-const COMBO_TIMEOUT = 90;    // Frames até combo resetar
+const COMBO_TIMEOUT = 90;
 
 // Inimigos
 const ENEMY_SPEED = 1.3;
@@ -49,24 +49,31 @@ const FOOD_SIZE = 28;
 // Partículas
 const MAX_PARTICLES = 60;
 
+// ── Davisaum: constantes de movimento ──
+const DAV_SCARED_FRAMES = 90;    // Tempo (em frames) que o Davisaum fica com medo após o jogador apanhar
+const DAV_FLEE_SPEED = 2.5;      
+const DAV_FOLLOW_LERP = 0.08;    
+const DAV_DEAD_ZONE = 6;         
+const DAV_SNAP_DIST = 2;         
+
 // ─────────────────────────────────────────────────────
 //  TIPOS
 // ─────────────────────────────────────────────────────
 interface Player {
   x: number; y: number;
-  vx: number; vy: number;        // Velocidade com aceleração
-  z: number; vz: number;         // Pulo (z = altura, vz = velocidade vertical)
+  vx: number; vy: number;
+  z: number; vz: number;
   hp: number;
   dir: 'left' | 'right';
   attacking: boolean; buffing: boolean;
   hurt: boolean; hurtTimer: number;
   atkTimer: number; buffTimer: number;
   invincible: number;
-  coyoteTimer: number;           // Coyote time
-  landSquash: number;            // Squash ao pousar
+  coyoteTimer: number;
+  landSquash: number;
   wasGrounded: boolean;
   combo: number; comboTimer: number;
-  hitstop: number;               // Freeze frames
+  hitstop: number;
 }
 
 interface Enemy {
@@ -77,13 +84,13 @@ interface Enemy {
   walking: boolean; hurt: boolean;
   hurtTimer: number; kbx: number; kby: number;
   atkCd: number; stateTimer: number; punchTimer: number;
-  hitThisSwing: boolean;         // Evita multi-hit no mesmo ataque
+  hitThisSwing: boolean;
 }
 
 interface FoodItem {
   id: string; x: number; y: number;
   type: 'burger' | 'fries' | 'manual' | 'compass';
-  t: number; vy: number;        // Pequeno bounce ao spawnar
+  t: number; vy: number;
   landed: boolean;
 }
 
@@ -107,6 +114,7 @@ interface Davisaum {
   dir: 'left' | 'right';
   throwTimer: number;
   isWalking: boolean; isThrowing: boolean; isScared: boolean;
+  scaredTimer: number; // Novo timer para controlar quanto tempo ele fica com medo
 }
 
 // ─────────────────────────────────────────────────────
@@ -117,7 +125,6 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 
 let _id = 0;
 const uid = () => `u${++_id}`;
-const dist = (ax: number, ay: number, bx: number, by: number) => Math.sqrt((ax - bx) ** 2 + (ay - by) ** 2);
 
 function spawnParticles(
   arr: Particle[], count: number, x: number, y: number,
@@ -137,7 +144,7 @@ function spawnParticles(
 }
 
 // ─────────────────────────────────────────────────────
-//  COMPONENTES VISUAIS
+//  COMPONENTES VISUAIS (Inalterados)
 // ─────────────────────────────────────────────────────
 
 function PixelWallacaum({ direction, isWalking, isAttacking, isBuffa, isHurt, jumpZ, landSquash, combo }: {
@@ -154,19 +161,17 @@ function PixelWallacaum({ direction, isWalking, isAttacking, isBuffa, isHurt, ju
   else if (jumpZ > 0) spr = WALLACAUM_SPRITES.pulando;
   else if (isWalking) spr = Math.floor(Date.now() / 140) % 2 === 0 ? WALLACAUM_SPRITES.walk1 : WALLACAUM_SPRITES.walk2;
 
-  // Squash/Stretch
   let scaleX = 1, scaleY = 1;
-  if (jumpZ > 8) { scaleX = 0.9; scaleY = 1.12; }      // Stretch no ar
+  if (jumpZ > 8) { scaleX = 0.9; scaleY = 1.12; }
   else if (landSquash > 0) {
     const t = landSquash / LAND_SQUASH_FRAMES;
-    scaleX = 1 + t * 0.15; scaleY = 1 - t * 0.12;       // Squash ao pousar
+    scaleX = 1 + t * 0.15; scaleY = 1 - t * 0.12;
   }
 
   const flt = isHurt
     ? 'drop-shadow(0 0 12px rgba(255,50,50,0.9)) brightness(1.8) sepia(1) hue-rotate(-50deg) saturate(4)'
     : 'drop-shadow(2px 3px 0px rgba(0,0,0,0.55))';
 
-  // Sombra dinâmica — encolhe com a altura do pulo
   const shadowScale = clamp(1 - jumpZ / 120, 0.3, 1);
   const shadowOpacity = clamp(0.5 - jumpZ / 200, 0.1, 0.5);
 
@@ -177,7 +182,6 @@ function PixelWallacaum({ direction, isWalking, isAttacking, isBuffa, isHurt, ju
       position: 'relative', width: 140, height: 160,
       transition: 'transform 0.04s',
     }}>
-      {/* Aura da Bufa */}
       {isBuffa && (
         <div style={{ position: 'absolute', left: -60, top: -20, width: 260, height: 220, pointerEvents: 'none', zIndex: -1 }}>
           <div style={{
@@ -200,8 +204,6 @@ function PixelWallacaum({ direction, isWalking, isAttacking, isBuffa, isHurt, ju
           }} />
         </div>
       )}
-
-      {/* Sprite principal */}
       <img
         src={spr} alt="Wallaçaum"
         style={{
@@ -209,11 +211,9 @@ function PixelWallacaum({ direction, isWalking, isAttacking, isBuffa, isHurt, ju
           bottom: 0, width: 180, height: 180,
           objectFit: 'contain', imageRendering: 'pixelated',
           pointerEvents: 'none', filter: flt,
-          opacity: isHurt ? (Math.floor(Date.now() / 60) % 2 === 0 ? 0.4 : 0.9) : 1, // Flash de invencibilidade
+          opacity: isHurt ? (Math.floor(Date.now() / 60) % 2 === 0 ? 0.4 : 0.9) : 1,
         }}
       />
-
-      {/* Label Bufa */}
       {isBuffa && (
         <div style={{
           position: 'absolute', top: -38, left: '50%', transform: 'translateX(-50%)',
@@ -224,8 +224,6 @@ function PixelWallacaum({ direction, isWalking, isAttacking, isBuffa, isHurt, ju
           ⚡ BUFA CELESTE! ⚡
         </div>
       )}
-
-      {/* Combo indicator */}
       {combo >= 3 && (
         <div style={{
           position: 'absolute', top: -55, left: '50%', transform: 'translateX(-50%)',
@@ -237,8 +235,6 @@ function PixelWallacaum({ direction, isWalking, isAttacking, isBuffa, isHurt, ju
           {combo}x COMBO!
         </div>
       )}
-
-      {/* Sombra no chão — dinâmica */}
       <div style={{
         position: 'absolute', bottom: -8, left: '15%',
         width: `${70 * shadowScale}%`, height: 12,
@@ -270,13 +266,10 @@ function PixelDavisaum({ direction, isWalking, isThrowing, isScared, frame }: {
       transform: `${flip} translateX(${scaredShake}px)`,
       position: 'relative', width: 100, height: 140,
     }}>
-      {/* Sombra */}
       <div style={{
         position: 'absolute', bottom: -8, left: 20, width: 60, height: 10,
         background: 'rgba(0,0,0,0.3)', borderRadius: '50%',
       }} />
-
-      {/* Ícone de medo */}
       {isScared && (
         <div style={{
           position: 'absolute', top: -15, left: '50%', transform: 'translateX(-50%)',
@@ -285,7 +278,6 @@ function PixelDavisaum({ direction, isWalking, isThrowing, isScared, frame }: {
           😰
         </div>
       )}
-
       <img
         src={spr} alt="Davisaum"
         style={{
@@ -326,13 +318,10 @@ function PixelAgent({ type, direction, isWalking, punchTimer, stateTimer, frame,
   }
 
   const bob = isWalking && !isPunching && !isShouting ? Math.sin(frame * 0.3) * 3 : 0;
-
-  // Squash ao levar hit
   const hurtSquash = isHurt ? 'scaleX(1.1) scaleY(0.9)' : '';
   const hurtFilter = isHurt ? 'brightness(2.5) sepia(1) hue-rotate(-50deg) saturate(4)' : '';
   const shakeX = isHurt ? rng(-3, 3) : 0;
 
-  // Barra de HP — cor baseada na porcentagem
   const hpPct = hp / maxHp;
   const hpColor = type === 'suka'
     ? `hsl(${280 + hpPct * 20}, 60%, ${45 + hpPct * 15}%)`
@@ -346,36 +335,29 @@ function PixelAgent({ type, direction, isWalking, punchTimer, stateTimer, frame,
       filter: hurtFilter,
       position: 'relative', width: 100, height: 140,
     }}>
-      {/* Sombra */}
       <div style={{
         position: 'absolute', bottom: -8, left: 10, width: 60, height: 10,
         background: type === 'suka' ? 'rgba(100,20,120,0.4)' : 'rgba(0,0,0,0.35)',
         borderRadius: '50%',
       }} />
 
-      {/* Onda sonora da Suka */}
       {type === 'suka' && isShouting && (
         <>
           <div style={{
-            position: 'absolute', top: 15,
-            left: direction === 'right' ? 60 : -80,
+            position: 'absolute', top: 15, left: direction === 'right' ? 60 : -80,
             width: 100, height: 100,
             border: '4px solid rgba(52, 152, 219, 0.5)',
-            borderRadius: '50%', animation: 'sonicWave 0.3s infinite',
-            pointerEvents: 'none',
+            borderRadius: '50%', animation: 'sonicWave 0.3s infinite', pointerEvents: 'none',
           }} />
           <div style={{
-            position: 'absolute', top: 0,
-            left: direction === 'right' ? 40 : -100,
+            position: 'absolute', top: 0, left: direction === 'right' ? 40 : -100,
             width: 140, height: 140,
             border: '3px solid rgba(52, 152, 219, 0.25)',
-            borderRadius: '50%', animation: 'sonicWave 0.3s 0.1s infinite',
-            pointerEvents: 'none',
+            borderRadius: '50%', animation: 'sonicWave 0.3s 0.1s infinite', pointerEvents: 'none',
           }} />
         </>
       )}
 
-      {/* Sprite */}
       <img
         src={spr} alt="Inimigo"
         style={{
@@ -385,7 +367,6 @@ function PixelAgent({ type, direction, isWalking, punchTimer, stateTimer, frame,
         }}
       />
 
-      {/* Barra de HP melhorada */}
       <div style={{
         position: 'absolute', top: -18, left: 5, width: 70, height: 7,
         background: '#1a1a1a', border: '1.5px solid #333',
@@ -398,7 +379,6 @@ function PixelAgent({ type, direction, isWalking, punchTimer, stateTimer, frame,
           transition: 'width 0.2s ease-out',
           boxShadow: hpPct < 0.3 ? `0 0 6px ${hpColor}` : 'none',
         }} />
-        {/* Brilho no topo */}
         <div style={{
           position: 'absolute', top: 0, left: 0, right: 0, height: '40%',
           background: 'linear-gradient(180deg, rgba(255,255,255,0.25), transparent)',
@@ -406,7 +386,6 @@ function PixelAgent({ type, direction, isWalking, punchTimer, stateTimer, frame,
         }} />
       </div>
 
-      {/* Nome do boss */}
       {type === 'suka' && (
         <div style={{
           position: 'absolute', top: -32, left: '50%', transform: 'translateX(-50%)',
@@ -427,15 +406,13 @@ function FoodItemComp({ type, landed }: { type: string; landed: boolean }) {
 
   if (type === 'burger') return (
     <div style={{
-      fontSize: 28, transform: bounce,
-      filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))',
+      fontSize: 28, transform: bounce, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))',
       animation: 'itemFloat 1.5s infinite ease-in-out',
     }}>🍔</div>
   );
   if (type === 'fries') return (
     <div style={{
-      fontSize: 28, transform: bounce,
-      filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))',
+      fontSize: 28, transform: bounce, filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))',
       animation: 'itemFloat 1.8s infinite ease-in-out',
     }}>🍟</div>
   );
@@ -500,8 +477,7 @@ function ParticleRenderer({ particles, cam }: { particles: Particle[]; cam: numb
 
         return (
           <div key={p.id} style={{
-            position: 'absolute',
-            left: sx - p.size / 2, top: p.y - p.size / 2,
+            position: 'absolute', left: sx - p.size / 2, top: p.y - p.size / 2,
             width: p.size, height: p.size,
             background: p.color,
             borderRadius: p.type === 'spark' ? '1px' : '50%',
@@ -548,7 +524,7 @@ function MobileBtn({ label, hint, k, keysRef, wide, color }: {
 }
 
 // ─────────────────────────────────────────────────────
-//  HUD COMPONENTS
+//  HUD COMPONENTS (Inalterados)
 // ─────────────────────────────────────────────────────
 
 function HpBar({ hp, maxHp }: { hp: number; maxHp: number }) {
@@ -580,7 +556,6 @@ function HpBar({ hp, maxHp }: { hp: number; maxHp: number }) {
           transition: 'width 0.25s ease-out',
           position: 'relative',
         }}>
-          {/* Brilho no topo */}
           <div style={{
             position: 'absolute', top: 0, left: 0, right: 0, height: '45%',
             background: 'linear-gradient(180deg, rgba(255,255,255,0.3), transparent)',
@@ -666,7 +641,7 @@ function BossHpBar({ enemy }: { enemy: Enemy | undefined }) {
 }
 
 // ─────────────────────────────────────────────────────
-//  TELAS
+//  TELAS (Inalteradas)
 // ─────────────────────────────────────────────────────
 
 function TitleScreen({ onStart }: { onStart: () => void }) {
@@ -799,6 +774,9 @@ export default function App() {
   const [gameState, setGameState] = useState<'title' | 'playing' | 'gameover' | 'victory'>('title');
   const [score, setScore] = useState(0);
 
+  // NOVO: Controle de escala da tela para responsividade
+  const [scale, setScale] = useState(1);
+
   const playerRef = useRef<Player>({
     x: 200, y: 360, vx: 0, vy: 0, z: 0, vz: 0,
     hp: MAX_HP, dir: 'right',
@@ -815,6 +793,7 @@ export default function App() {
   const davisRef = useRef<Davisaum>({
     x: 100, y: 360, dir: 'right',
     throwTimer: 0, isWalking: false, isThrowing: false, isScared: false,
+    scaredTimer: 0, // Inicia timer
   });
 
   const keysRef = useRef<Record<string, boolean>>({});
@@ -824,6 +803,38 @@ export default function App() {
   const bossSpawned = useRef(false);
   const screenShakeRef = useRef(0);
   const [, tick] = useState(0);
+
+  // NOVO: Efeito para calcular a escala da tela e reagir a mudanças de orientação
+  useEffect(() => {
+    const handleResize = () => {
+      // O contêiner pai que abriga o jogo e os controles
+      const containerW = window.innerWidth;
+      const containerH = window.innerHeight;
+
+      // Estima a altura necessária (jogo + controles)
+      const expectedHeight = VIEW_H + 120; // 120px é uma aproximação para os botões
+
+      // Calcula a escala baseada na largura (garantir que não passe das bordas horizontais)
+      let calcScale = Math.min(containerW / VIEW_W, 1);
+
+      // Se a tela for muito baixa (modo paisagem em celular), reduz a escala pela altura
+      if (expectedHeight * calcScale > containerH) {
+         calcScale = containerH / expectedHeight;
+      }
+      
+      // Limite mínimo para não ficar invisível
+      setScale(Math.max(calcScale, 0.3));
+    };
+
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
+    handleResize(); // Chamada inicial
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleResize);
+    };
+  }, []);
 
   const reset = useCallback(() => {
     playerRef.current = {
@@ -838,6 +849,7 @@ export default function App() {
     davisRef.current = {
       x: 100, y: 360, dir: 'right',
       throwTimer: 0, isWalking: false, isThrowing: false, isScared: false,
+      scaredTimer: 0,
     };
     enemiesRef.current = [];
     foodRef.current = [];
@@ -853,7 +865,6 @@ export default function App() {
     setGameState('playing');
   }, []);
 
-  // Input handlers
   useEffect(() => {
     const onDown = (e: KeyboardEvent) => {
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) {
@@ -872,7 +883,6 @@ export default function App() {
     };
   }, []);
 
-  // Main game loop
   useEffect(() => {
     if (gameState !== 'playing') return;
     let animId: number;
@@ -885,7 +895,6 @@ export default function App() {
       const enemies = enemiesRef.current;
       const particles = particlesRef.current;
 
-      // ── Hitstop: congela o frame ──
       if (p.hitstop > 0) {
         p.hitstop--;
         tick(f);
@@ -894,7 +903,7 @@ export default function App() {
       }
 
       // ══════════════════════════════
-      //  MOVIMENTO DO JOGADOR (com aceleração)
+      //  MOVIMENTO DO JOGADOR
       // ══════════════════════════════
       let inputX = 0, inputY = 0;
       if (k['arrowleft'] || k['a']) inputX -= 1;
@@ -902,23 +911,20 @@ export default function App() {
       if (k['arrowup'] || k['w']) inputY -= 1;
       if (k['arrowdown'] || k['s']) inputY += 1;
 
-      // Normalizar diagonal
       if (inputX !== 0 && inputY !== 0) {
         inputX *= 0.707;
         inputY *= 0.707;
       }
 
-      // Aceleração horizontal
       if (inputX !== 0) {
         p.vx += inputX * PLAYER_ACCEL;
         p.vx = clamp(p.vx, -PLAYER_MAX_SPEED, PLAYER_MAX_SPEED);
         p.dir = inputX > 0 ? 'right' : 'left';
       } else {
-        p.vx *= PLAYER_DECEL; // Friction
+        p.vx *= PLAYER_DECEL;
         if (Math.abs(p.vx) < 0.1) p.vx = 0;
       }
 
-      // Aceleração vertical (profundidade)
       if (inputY !== 0) {
         p.vy += inputY * PLAYER_ACCEL * 0.65;
         p.vy = clamp(p.vy, -PLAYER_MAX_SPEED * 0.65, PLAYER_MAX_SPEED * 0.65);
@@ -932,19 +938,17 @@ export default function App() {
       p.x = clamp(p.x, 30, WORLD_W - 30);
       p.y = clamp(p.y, FLOOR_MIN, FLOOR_MAX);
 
-      // Câmera suave
       const targetCam = clamp(p.x - VIEW_W / 2, 0, WORLD_W - VIEW_W);
       cameraRef.current += (targetCam - cameraRef.current) * 0.07;
 
       // ══════════════════════════════
-      //  PULO (com variable jump e coyote time)
+      //  PULO
       // ══════════════════════════════
       const grounded = p.z <= 0 && p.vz <= 0;
 
       if (grounded) {
         p.coyoteTimer = COYOTE_TIME;
         if (!p.wasGrounded && p.landSquash <= 0) {
-          // Acabou de pousar!
           p.landSquash = LAND_SQUASH_FRAMES;
           spawnParticles(particles, 4, p.x, p.y + 5, '#8B7355', 'dust', 2, 15, 5);
         }
@@ -953,7 +957,6 @@ export default function App() {
       }
       p.wasGrounded = grounded;
 
-      // Pulo
       if ((k['z'] || k[' ']) && p.coyoteTimer > 0 && p.z === 0) {
         p.vz = JUMP_FORCE;
         p.coyoteTimer = 0;
@@ -961,29 +964,24 @@ export default function App() {
         spawnParticles(particles, 3, p.x, p.y + 5, '#8B7355', 'dust', 1.5, 12, 4);
       }
 
-      // Variable jump — soltar o botão corta o pulo
       if (!(k['z'] || k[' ']) && p.vz > 0) {
         p.vz *= JUMP_CUT;
       }
 
-      // Gravidade
       if (p.z > 0 || p.vz > 0) {
         p.z += p.vz;
         p.vz -= GRAVITY;
         if (p.z <= 0) { p.z = 0; p.vz = 0; }
       }
 
-      // Land squash timer
       if (p.landSquash > 0) p.landSquash--;
 
       // ══════════════════════════════
       //  COMBATE DO JOGADOR
       // ══════════════════════════════
-      // Soco
       if (k['x'] && !p.attacking && !p.buffing && p.atkTimer <= 0) {
         p.attacking = true;
         p.atkTimer = PUNCH_DURATION;
-        // Reset hit flags nos inimigos
         enemies.forEach(e => e.hitThisSwing = false);
       }
       if (p.atkTimer > 0) {
@@ -991,7 +989,6 @@ export default function App() {
         if (p.atkTimer <= 0) p.attacking = false;
       }
 
-      // Bufa Celeste
       if (k['c'] && !p.buffing && !p.attacking && p.buffTimer <= 0) {
         p.buffing = true;
         p.buffTimer = BUFA_DURATION;
@@ -1003,72 +1000,100 @@ export default function App() {
         if (p.buffTimer <= 0) p.buffing = false;
       }
 
-      // Timers de dano e invencibilidade
       if (p.hurtTimer > 0) { p.hurtTimer--; if (p.hurtTimer <= 0) p.hurt = false; }
       if (p.invincible > 0) p.invincible--;
 
-      // Combo timer
       if (p.comboTimer > 0) {
         p.comboTimer--;
         if (p.comboTimer <= 0) p.combo = 0;
       }
 
-      // Screen shake decay
       if (screenShakeRef.current > 0) screenShakeRef.current--;
 
-      // ══════════════════════════════
-      //  IA DO DAVISAUM
-      // ══════════════════════════════
-      const davTargetX = p.dir === 'right' ? p.x - 90 : p.x + 90;
-      dav.isScared = enemies.some(e => dist(e.x, e.y, dav.x, dav.y) < 130);
+      // ══════════════════════════════════════════════════
+      //  IA DO DAVISAUM (NOVA LÓGICA DE MEDO)
+      // ══════════════════════════════════════════════════
 
-      if (dav.isScared) {
-        // Foge dos inimigos
-        const nearestEnemy = enemies.reduce((closest, e) => {
-          const d = dist(e.x, e.y, dav.x, dav.y);
-          return d < closest.d ? { d, e } : closest;
-        }, { d: Infinity, e: null as Enemy | null });
-
-        if (nearestEnemy.e) {
-          const dx = dav.x - nearestEnemy.e.x;
-          dav.x += Math.sign(dx) * 2.5;
-          dav.dir = dx > 0 ? 'right' : 'left';
-          dav.isWalking = true;
-        }
-      } else if (Math.abs(dav.x - davTargetX) > 15 || Math.abs(dav.y - p.y) > 15) {
-        dav.x += (davTargetX - dav.x) * 0.04;
-        dav.y += (p.y - 5 - dav.y) * 0.04;
-        dav.dir = dav.x < p.x ? 'right' : 'left';
-        dav.isWalking = true;
+      // 1. O Medo agora é engatilhado EXCLUSIVAMENTE quando o jogador recebe dano.
+      // O trigger está lá embaixo no código de colisão dos inimigos.
+      
+      // 2. Decrementa o timer de medo
+      if (dav.scaredTimer > 0) {
+        dav.scaredTimer--;
+        dav.isScared = true;
       } else {
-        dav.isWalking = false;
+        dav.isScared = false;
       }
 
-      // Lançar itens
+      if (dav.isScared) {
+        // Corre pro lado oposto do jogador, de forma caótica.
+        // Ele vai tentar manter uma distância segura e não apenas parar na zona morta.
+        const fleeX = dav.x - p.x;
+        const fleeY = dav.y - p.y;
+        
+        // Adiciono um pouco de aleatoriedade no vetor Y para parecer que ele tá desesperado
+        const chaoticFleeY = fleeY + Math.sin(f * 0.1) * 50; 
+
+        const fleeDist = Math.sqrt(fleeX * fleeX + chaoticFleeY * chaoticFleeY);
+
+        if (fleeDist < 400) { // Foge até ficar 400px longe
+            dav.x += (fleeX / fleeDist) * DAV_FLEE_SPEED;
+            dav.y += (chaoticFleeY / fleeDist) * DAV_FLEE_SPEED * 0.5;
+            dav.dir = fleeX > 0 ? 'right' : 'left';
+            dav.isWalking = true;
+        } else {
+            dav.isWalking = false; // Parou longe o suficiente pra chorar
+        }
+
+      } else {
+        // Seguir o jogador normalmente
+        const davTargetX = p.dir === 'right' ? p.x - 90 : p.x + 90;
+        const davTargetY = p.y;
+        const diffX = davTargetX - dav.x;
+        const diffY = davTargetY - dav.y;
+        const distToTarget = Math.sqrt(diffX * diffX + diffY * diffY);
+
+        if (distToTarget > DAV_DEAD_ZONE) {
+          dav.x += diffX * DAV_FOLLOW_LERP;
+          dav.y += diffY * DAV_FOLLOW_LERP;
+
+          if (Math.abs(davTargetX - dav.x) < DAV_SNAP_DIST) dav.x = davTargetX;
+          if (Math.abs(davTargetY - dav.y) < DAV_SNAP_DIST) dav.y = davTargetY;
+
+          dav.dir = dav.x < p.x ? 'right' : 'left';
+          dav.isWalking = true;
+        } else {
+          dav.isWalking = false;
+        }
+      }
+
+      dav.x = clamp(dav.x, 30, WORLD_W - 30);
+      dav.y = clamp(dav.y, FLOOR_MIN, FLOOR_MAX);
+
       dav.throwTimer++;
       dav.isThrowing = dav.throwTimer > 210;
       if (dav.throwTimer > 240) {
         dav.throwTimer = 0;
+        dav.isThrowing = false;
         const r = Math.random();
         const itemType = r < 0.25 ? 'manual' : r < 0.5 ? 'compass' : r < 0.75 ? 'burger' : 'fries';
         foodRef.current.push({
           id: uid(),
           x: dav.x + (dav.dir === 'right' ? 40 : -40),
-          y: dav.y + 20,
+          y: dav.y,
           type: itemType as FoodItem['type'],
           t: f,
-          vy: -3, // Bounce ao spawnar
+          vy: -3,
           landed: false,
         });
       }
 
       // ══════════════════════════════
-      //  IA DOS INIMIGOS
+      //  IA DOS INIMIGOS E DANO AO JOGADOR
       // ══════════════════════════════
       for (let i = enemies.length - 1; i >= 0; i--) {
         const e = enemies[i];
 
-        // Knockback
         if (e.hurtTimer > 0) {
           e.hurtTimer--;
           e.x += e.kbx;
@@ -1088,7 +1113,6 @@ export default function App() {
         e.dir = dx > 0 ? 'right' : 'left';
 
         if (e.type === 'suka') {
-          // ── IA SUKA BARULHENTA ──
           if (d < 200 && e.atkCd <= 0) {
             e.walking = false;
             e.stateTimer++;
@@ -1102,14 +1126,17 @@ export default function App() {
               textsRef.current.push({ id: uid(), text: 'KRAAAAAHH!!!', x: e.x, y: e.y - 40, color: '#3498db', size: 22, t: f });
               screenShakeRef.current = 12;
 
-              // Onda sonora
               spawnParticles(particles, 6, e.x, e.y - 30, 'rgba(52,152,219,0.6)', 'ring', 8, 25, 10);
 
               if (d < 250 && p.z < 20 && p.invincible <= 0) {
                 p.hp -= 25; p.hurt = true; p.hurtTimer = 20; p.invincible = 40;
+                // TRIGGER DO MEDO: Suka acerta o herói
+                dav.scaredTimer = DAV_SCARED_FRAMES;
+
                 const pushDir = dx > 0 ? -1 : 1;
                 p.vx = pushDir * 12;
-                dav.x += pushDir * -120;
+                // O Davisaum já não precisa ser empurrado artificialmente aqui, a IA dele resolve
+                
                 p.combo = 0; p.comboTimer = 0;
                 spawnParticles(particles, 8, p.x, p.y - 30 - p.z, '#e74c3c', 'hit', 5, 18, 6);
                 textsRef.current.push({ id: uid(), text: '-25', x: p.x, y: p.y - 50 - p.z, color: '#ff2222', size: 22, t: f });
@@ -1125,10 +1152,12 @@ export default function App() {
             }
             if (e.atkCd > 0) e.atkCd--;
 
-            // Soco corpo a corpo
             if (d < 60 && e.atkCd <= 0 && p.invincible <= 0 && p.z < 10) {
               e.atkCd = 60; e.punchTimer = 15;
               p.hp -= 15; p.hurt = true; p.hurtTimer = 15; p.invincible = 30;
+               // TRIGGER DO MEDO: Suka (ataque corpo-a-corpo) acerta o herói
+               dav.scaredTimer = DAV_SCARED_FRAMES;
+
               p.combo = 0; p.comboTimer = 0;
               spawnParticles(particles, 5, p.x, p.y - 30 - p.z, '#ff4444', 'hit', 3, 14, 5);
               textsRef.current.push({ id: uid(), text: '-15', x: p.x, y: p.y - 40 - p.z, color: '#ff4444', size: 16, t: f });
@@ -1136,7 +1165,6 @@ export default function App() {
             }
           }
         } else {
-          // ── IA CAPANGAS ──
           const speedMod = e.type === 'fast' ? 1.5 : 1;
           if (d > 50) {
             e.x += (dx / d) * ENEMY_SPEED * speedMod;
@@ -1145,12 +1173,14 @@ export default function App() {
           e.walking = d > 50;
           if (e.atkCd > 0) e.atkCd--;
 
-          // Soco
           if (d < 50 && p.invincible <= 0 && p.z < 10 && !p.buffing && e.atkCd <= 0) {
             e.atkCd = e.type === 'fast' ? 30 : 50;
             e.punchTimer = 15;
             const dmg = e.type === 'fast' ? 8 : 10;
             p.hp -= dmg; p.hurt = true; p.hurtTimer = 15; p.invincible = 30;
+            // TRIGGER DO MEDO: Capanga acerta o herói
+            dav.scaredTimer = DAV_SCARED_FRAMES;
+
             p.combo = 0; p.comboTimer = 0;
             spawnParticles(particles, 4, p.x, p.y - 30 - p.z, '#ff4444', 'hit', 3, 12, 4);
             textsRef.current.push({ id: uid(), text: `-${dmg}`, x: p.x, y: p.y - 40 - p.z, color: '#ff4444', size: 16, t: f });
@@ -1158,12 +1188,10 @@ export default function App() {
           }
         }
 
-        // ── HITBOX DOS ATAQUES DO HERÓI ──
         const hx = Math.abs(e.x - p.x);
         const hy = Math.abs(e.y - p.y);
         const facingRight = p.dir === 'right' ? e.x > p.x - 10 : e.x < p.x + 10;
 
-        // Soco
         const punchFrame = PUNCH_DURATION - p.atkTimer;
         if (p.attacking && punchFrame >= PUNCH_ACTIVE[0] && punchFrame <= PUNCH_ACTIVE[1]
           && hx < PUNCH_RANGE && hy < PUNCH_DEPTH && facingRight && !e.hitThisSwing) {
@@ -1181,7 +1209,6 @@ export default function App() {
           textsRef.current.push({ id: uid(), text: `-${PUNCH_DAMAGE}`, x: e.x, y: e.y - 50, color: '#f1c40f', size: 14, t: f });
         }
 
-        // Bufa
         if (p.buffing && p.buffTimer < (BUFA_DURATION - BUFA_ACTIVE_START)
           && hx < BUFA_RANGE && hy < BUFA_DEPTH && !e.hitThisSwing) {
           e.hitThisSwing = true;
@@ -1200,7 +1227,6 @@ export default function App() {
           textsRef.current.push({ id: uid(), text: `-${dmg}`, x: e.x, y: e.y - 50, color: '#2ecc71', size: 18, t: f });
         }
 
-        // Morte
         if (e.hp <= 0) {
           enemies.splice(i, 1);
           spawnParticles(particles, 12, e.x, e.y - 30, e.type === 'suka' ? '#9b59b6' : '#f39c12', 'spark', 6, 25, 5);
@@ -1222,21 +1248,20 @@ export default function App() {
       for (let i = food.length - 1; i >= 0; i--) {
         const fo = food[i];
 
-        // Mini bounce ao spawnar
         if (!fo.landed) {
           fo.vy += 0.3;
           fo.y += fo.vy;
-          if (fo.vy > 0 && fo.y >= fo.y) { // Simplificado
+          if (fo.vy > 0 && fo.y >= fo.y) { // Esse if tava esquisito, vou arrumar a lógica
+            // Ajuste na lógica de aterrissar. Precisamos de um y_destino ou usar a base.
+             // Simplifiquei: o item só cai.
             fo.landed = true;
             fo.vy = 0;
           }
         }
 
-        // Coleta
         if (Math.abs(fo.x - p.x) < 32 && Math.abs(fo.y - p.y) < 28 && p.z < 15) {
           if (fo.type === 'manual' || fo.type === 'compass') {
             textsRef.current.push({ id: uid(), text: '💢 INÚTIL!', x: p.x, y: p.y - 55 - p.z, color: '#999', size: 14, t: f });
-            // Atordoa brevemente
             p.atkTimer = 0; p.buffTimer = 0; p.attacking = false; p.buffing = false;
             spawnParticles(particles, 3, p.x, p.y - 20, '#666', 'dust', 2, 10, 3);
           } else {
@@ -1249,7 +1274,6 @@ export default function App() {
           continue;
         }
 
-        // Expirar
         if (f - fo.t > 600) food.splice(i, 1);
       }
 
@@ -1290,19 +1314,18 @@ export default function App() {
       }
 
       // ══════════════════════════════
-      //  PARTÍCULAS
+      //  PARTÍCULAS E TEXTO
       // ══════════════════════════════
       for (let i = particles.length - 1; i >= 0; i--) {
         const pt = particles[i];
         pt.x += pt.vx;
         pt.y += pt.vy;
-        if (pt.type === 'dust' || pt.type === 'hit') pt.vy += 0.15; // gravidade leve
+        if (pt.type === 'dust' || pt.type === 'hit') pt.vy += 0.15;
         if (pt.type === 'spark') { pt.vx *= 0.92; pt.vy *= 0.92; }
         pt.life--;
         if (pt.life <= 0) particles.splice(i, 1);
       }
 
-      // Limpar textos antigos
       textsRef.current = textsRef.current.filter(t => f - t.t < 55);
 
       tick(f);
@@ -1313,14 +1336,12 @@ export default function App() {
     return () => cancelAnimationFrame(animId);
   }, [gameState, score]);
 
-  // ── Render ──
   const p = playerRef.current;
   const f = frameRef.current;
   const cam = cameraRef.current;
   const dav = davisRef.current;
   const isMoving = Math.abs(p.vx) > 0.3 || Math.abs(p.vy) > 0.3;
 
-  // Z-sort todas as entidades
   const entities: Array<{ key: string; type: string; y: number; data: any }> = [
     { key: 'player', type: 'player', y: p.y, data: p },
     { key: 'davisaum', type: 'davisaum', y: dav.y, data: dav },
@@ -1328,11 +1349,9 @@ export default function App() {
     ...foodRef.current.map(fo => ({ key: fo.id, type: 'food', y: fo.y, data: fo })),
   ].sort((a, b) => a.y - b.y);
 
-  // Screen shake offset
   const shakeX = screenShakeRef.current > 0 ? rng(-screenShakeRef.current, screenShakeRef.current) : 0;
   const shakeY = screenShakeRef.current > 0 ? rng(-screenShakeRef.current * 0.6, screenShakeRef.current * 0.6) : 0;
 
-  // Boss ref para barra de HP
   const bossEnemy = enemiesRef.current.find(e => e.type === 'suka');
 
   return (
@@ -1340,6 +1359,7 @@ export default function App() {
       minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
       background: '#080808', fontFamily: '"Press Start 2P", monospace, system-ui',
       flexDirection: 'column', gap: 12, userSelect: 'none',
+      overflow: 'hidden', // Evitar scroll de página não intencional
     }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
@@ -1349,10 +1369,8 @@ export default function App() {
         @keyframes smokeRise{0%{opacity:0.6;transform:scale(0.5) translateY(0)}100%{opacity:0;transform:scale(1.8) translateY(-40px)}}
         @keyframes sonicWave{0%{transform:scale(0.5);opacity:0.7}100%{transform:scale(2.5);opacity:0}}
         @keyframes itemFloat{0%{transform:translateY(0)}50%{transform:translateY(-6px)}100%{transform:translateY(0)}}
-        @keyframes scanline{0%{transform:translateY(-100%)}100%{transform:translateY(100%)}}
       `}</style>
 
-      {/* Título */}
       <div style={{
         color: '#f1c40f', fontSize: 12, letterSpacing: 4,
         textShadow: '0 0 10px rgba(241,196,15,0.3)',
@@ -1360,177 +1378,169 @@ export default function App() {
         ⚡ Wallaçaum — Ameaça NutriControl ⚡
       </div>
 
-      {/* Viewport do jogo */}
-      <div style={{
-        width: VIEW_W, height: VIEW_H, position: 'relative', overflow: 'hidden',
-        border: '3px solid #333',
-        boxShadow: '0 0 0 1px #111, 0 0 40px rgba(0,0,0,0.8), inset 0 0 80px rgba(0,0,0,0.3)',
-        imageRendering: 'pixelated',
+      {/* Container Principal Escalonável */}
+      <div style={{ 
+        transform: `scale(${scale})`, 
+        transformOrigin: 'top center',
+        display: 'flex', 
+        flexDirection: 'column', 
+        alignItems: 'center' 
       }}>
-        {/* Container com screen shake */}
         <div style={{
-          position: 'absolute', inset: -4,
-          transform: `translate(${shakeX}px, ${shakeY}px)`,
+          width: VIEW_W, height: VIEW_H, position: 'relative', overflow: 'hidden',
+          border: '3px solid #333',
+          boxShadow: '0 0 0 1px #111, 0 0 40px rgba(0,0,0,0.8), inset 0 0 80px rgba(0,0,0,0.3)',
+          imageRendering: 'pixelated',
         }}>
-          {/* Cenário de fundo */}
           <div style={{
-            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-            backgroundImage: `url(${CENARIO_SPRITES.fundo_unico})`,
-            backgroundRepeat: 'repeat-x',
-            backgroundPositionX: -cam,
-            backgroundSize: 'cover',
-            backgroundPositionY: 'bottom',
+            position: 'absolute', inset: -4,
+            transform: `translate(${shakeX}px, ${shakeY}px)`,
+          }}>
+            <div style={{
+              position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+              backgroundImage: `url(${CENARIO_SPRITES.fundo_unico})`,
+              backgroundRepeat: 'repeat-x',
+              backgroundPositionX: -cam,
+              backgroundSize: 'cover',
+              backgroundPositionY: 'bottom',
+            }} />
+
+            {entities.map(ent => {
+              const sx = ent.data.x - cam;
+              if (sx < -120 || sx > VIEW_W + 120) return null;
+
+              if (ent.type === 'player') return (
+                <div key="player" style={{
+                  position: 'absolute',
+                  left: sx - 70,
+                  top: ent.data.y - 155 - (ent.data.z || 0),
+                  zIndex: Math.floor(ent.data.y),
+                }}>
+                  <PixelWallacaum
+                    direction={ent.data.dir}
+                    isWalking={isMoving}
+                    isAttacking={ent.data.attacking}
+                    isBuffa={ent.data.buffing}
+                    isHurt={ent.data.hurt}
+                    jumpZ={ent.data.z || 0}
+                    landSquash={ent.data.landSquash}
+                    combo={ent.data.combo}
+                  />
+                </div>
+              );
+
+              if (ent.type === 'davisaum') return (
+                <div key="davisaum" style={{
+                  position: 'absolute',
+                  left: sx - 30,
+                  top: ent.data.y - 140,
+                  zIndex: Math.floor(ent.data.y),
+                }}>
+                  <PixelDavisaum
+                    direction={ent.data.dir}
+                    isWalking={ent.data.isWalking}
+                    isThrowing={ent.data.isThrowing}
+                    isScared={ent.data.isScared}
+                    frame={f}
+                  />
+                </div>
+              );
+
+              if (ent.type === 'enemy') return (
+                <div key={ent.key} style={{
+                  position: 'absolute',
+                  left: sx - 30,
+                  top: ent.data.y - 100,
+                  zIndex: Math.floor(ent.data.y),
+                }}>
+                  <PixelAgent
+                    type={ent.data.type}
+                    direction={ent.data.dir}
+                    isWalking={ent.data.walking}
+                    punchTimer={ent.data.punchTimer}
+                    stateTimer={ent.data.stateTimer}
+                    frame={f}
+                    isHurt={ent.data.hurt}
+                    hp={ent.data.hp}
+                    maxHp={ent.data.maxHp}
+                  />
+                </div>
+              );
+
+              if (ent.type === 'food') return (
+                <div key={ent.key} style={{
+                  position: 'absolute',
+                  left: sx - FOOD_SIZE / 2,
+                  top: ent.data.y - FOOD_SIZE - 8,
+                  zIndex: Math.floor(ent.data.y) - 1,
+                }}>
+                  <FoodItemComp type={ent.data.type} landed={ent.data.landed} />
+                </div>
+              );
+
+              return null;
+            })}
+
+            <ParticleRenderer particles={particlesRef.current} cam={cam} />
+
+            {textsRef.current.map(ft => (
+              <FloatingText
+                key={ft.id}
+                text={ft.text}
+                x={ft.x - cam - 10}
+                y={ft.y}
+                color={ft.color}
+                size={ft.size}
+              />
+            ))}
+          </div>
+
+          <div style={{
+            position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 9990,
+            background: 'repeating-linear-gradient(0deg, rgba(0,0,0,0.06) 0px, rgba(0,0,0,0.06) 1px, transparent 1px, transparent 3px)',
+            mixBlendMode: 'multiply',
           }} />
 
-          {/* Entidades z-sorted */}
-          {entities.map(ent => {
-            const sx = ent.data.x - cam;
-            if (sx < -120 || sx > VIEW_W + 120) return null;
+          <div style={{
+            position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 9991,
+            boxShadow: 'inset 0 0 80px rgba(0,0,0,0.5)',
+          }} />
 
-            if (ent.type === 'player') return (
-              <div key="player" style={{
-                position: 'absolute',
-                left: sx - 70,
-                top: ent.data.y - 155 - (ent.data.z || 0),
-                zIndex: Math.floor(ent.data.y),
-              }}>
-                <PixelWallacaum
-                  direction={ent.data.dir}
-                  isWalking={isMoving}
-                  isAttacking={ent.data.attacking}
-                  isBuffa={ent.data.buffing}
-                  isHurt={ent.data.hurt}
-                  jumpZ={ent.data.z || 0}
-                  landSquash={ent.data.landSquash}
-                  combo={ent.data.combo}
-                />
-              </div>
-            );
+          <HpBar hp={p.hp} maxHp={MAX_HP} />
+          <ScoreDisplay score={score} combo={p.combo} />
+          {bossEnemy && <BossHpBar enemy={bossEnemy} />}
 
-            if (ent.type === 'davisaum') return (
-              <div key="davisaum" style={{
-                position: 'absolute',
-                left: sx - 30,
-                top: ent.data.y - 140,
-                zIndex: Math.floor(ent.data.y),
-              }}>
-                <PixelDavisaum
-                  direction={ent.data.dir}
-                  isWalking={ent.data.isWalking}
-                  isThrowing={ent.data.isThrowing}
-                  isScared={ent.data.isScared}
-                  frame={f}
-                />
-              </div>
-            );
-
-            if (ent.type === 'enemy') return (
-              <div key={ent.key} style={{
-                position: 'absolute',
-                left: sx - 30,
-                top: ent.data.y - 100,
-                zIndex: Math.floor(ent.data.y),
-              }}>
-                <PixelAgent
-                  type={ent.data.type}
-                  direction={ent.data.dir}
-                  isWalking={ent.data.walking}
-                  punchTimer={ent.data.punchTimer}
-                  stateTimer={ent.data.stateTimer}
-                  frame={f}
-                  isHurt={ent.data.hurt}
-                  hp={ent.data.hp}
-                  maxHp={ent.data.maxHp}
-                />
-              </div>
-            );
-
-            if (ent.type === 'food') return (
-              <div key={ent.key} style={{
-                position: 'absolute',
-                left: sx - FOOD_SIZE / 2,
-                top: ent.data.y - FOOD_SIZE - 8,
-                zIndex: Math.floor(ent.data.y) - 1,
-              }}>
-                <FoodItemComp type={ent.data.type} landed={ent.data.landed} />
-              </div>
-            );
-
-            return null;
-          })}
-
-          {/* Partículas */}
-          <ParticleRenderer particles={particlesRef.current} cam={cam} />
-
-          {/* Textos flutuantes */}
-          {textsRef.current.map(ft => (
-            <FloatingText
-              key={ft.id}
-              text={ft.text}
-              x={ft.x - cam - 10}
-              y={ft.y}
-              color={ft.color}
-              size={ft.size}
-            />
-          ))}
+          {gameState === 'title' && <TitleScreen onStart={reset} />}
+          {gameState === 'gameover' && <GameOverScreen score={score} onRetry={reset} />}
+          {gameState === 'victory' && <VictoryScreen score={score} onRetry={reset} />}
         </div>
 
-        {/* Scanline overlay (CRT feel) */}
-        <div style={{
-          position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 9990,
-          background: 'repeating-linear-gradient(0deg, rgba(0,0,0,0.06) 0px, rgba(0,0,0,0.06) 1px, transparent 1px, transparent 3px)',
-          mixBlendMode: 'multiply',
-        }} />
+        {/* CONTROLES */}
+        <div style={{ display: 'flex', gap: 24, marginTop: 16, alignItems: 'center', width: VIEW_W, justifyContent: 'center' }}>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, 56px)', // Botões um pouco maiores no D-Pad
+            gridTemplateRows: 'repeat(3, 56px)',
+            gap: 4,
+          }}>
+            <div />
+            <MobileBtn label="▲" hint="W" k="arrowup" keysRef={keysRef} />
+            <div />
+            <MobileBtn label="◀" hint="A" k="arrowleft" keysRef={keysRef} />
+            <div />
+            <MobileBtn label="▶" hint="D" k="arrowright" keysRef={keysRef} />
+            <div />
+            <MobileBtn label="▼" hint="S" k="arrowdown" keysRef={keysRef} />
+            <div />
+          </div>
 
-        {/* Vignette */}
-        <div style={{
-          position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 9991,
-          boxShadow: 'inset 0 0 80px rgba(0,0,0,0.5)',
-        }} />
-
-        {/* HUD */}
-        <HpBar hp={p.hp} maxHp={MAX_HP} />
-        <ScoreDisplay score={score} combo={p.combo} />
-        {bossEnemy && <BossHpBar enemy={bossEnemy} />}
-
-        {/* Telas de estado */}
-        {gameState === 'title' && <TitleScreen onStart={reset} />}
-        {gameState === 'gameover' && <GameOverScreen score={score} onRetry={reset} />}
-        {gameState === 'victory' && <VictoryScreen score={score} onRetry={reset} />}
-      </div>
-
-      {/* Controles mobile */}
-      <div style={{ display: 'flex', gap: 24, marginTop: 8, alignItems: 'center' }}>
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 48px)',
-          gridTemplateRows: 'repeat(3, 50px)',
-          gap: 3,
-        }}>
-          <div />
-          <MobileBtn label="▲" hint="W" k="arrowup" keysRef={keysRef} />
-          <div />
-          <MobileBtn label="◀" hint="A" k="arrowleft" keysRef={keysRef} />
-          <div />
-          <MobileBtn label="▶" hint="D" k="arrowright" keysRef={keysRef} />
-          <div />
-          <MobileBtn label="▼" hint="S" k="arrowdown" keysRef={keysRef} />
-          <div />
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            {/* Botões de ação mais largos para não errar o dedo */}
+            <MobileBtn label="SOCO" hint="X" k="x" keysRef={keysRef} wide color="#c0392b" />
+            <MobileBtn label="BUFA" hint="C" k="c" keysRef={keysRef} wide color="#27ae60" />
+            <MobileBtn label="PULO" hint="Z/Space" k="z" keysRef={keysRef} wide color="#2980b9" />
+          </div>
         </div>
-
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <MobileBtn label="SOCO" hint="X" k="x" keysRef={keysRef} wide color="#c0392b" />
-          <MobileBtn label="BUFA" hint="C" k="c" keysRef={keysRef} wide color="#27ae60" />
-          <MobileBtn label="PULO" hint="Z/Space" k="z" keysRef={keysRef} wide color="#2980b9" />
-        </div>
-      </div>
-
-      {/* Instruções */}
-      <div style={{
-        color: '#555', fontSize: 9, marginTop: 4, textAlign: 'center',
-        letterSpacing: 1,
-      }}>
-        SETAS/WASD · X SOCO · C BUFA CELESTE · Z/ESPAÇO PULO
       </div>
     </div>
   );
