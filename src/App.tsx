@@ -114,7 +114,7 @@ interface Davisaum {
   dir: 'left' | 'right';
   throwTimer: number;
   isWalking: boolean; isThrowing: boolean; isScared: boolean;
-  scaredTimer: number; // Novo timer para controlar quanto tempo ele fica com medo
+  scaredTimer: number; 
 }
 
 // ─────────────────────────────────────────────────────
@@ -144,7 +144,7 @@ function spawnParticles(
 }
 
 // ─────────────────────────────────────────────────────
-//  COMPONENTES VISUAIS (Inalterados)
+//  COMPONENTES VISUAIS (Inalterados da sua versão)
 // ─────────────────────────────────────────────────────
 
 function PixelWallacaum({ direction, isWalking, isAttacking, isBuffa, isHurt, jumpZ, landSquash, combo }: {
@@ -492,36 +492,52 @@ function ParticleRenderer({ particles, cam }: { particles: Particle[]; cam: numb
   );
 }
 
-function MobileBtn({ label, hint, k, keysRef, wide, color }: {
-  label: string; hint?: string; k: string; keysRef: React.MutableRefObject<Record<string, boolean>>;
-  wide?: boolean; color?: string;
+// NOVO: COMPONENTE DE BOTÃO MOBILE (ESTILO STARDEW VALLEY)
+function MobileOverlayBtn({ 
+  label, k, keysRef, color, size = 60, onTouchDown, onTouchUp 
+}: {
+  label: string; k: string; keysRef: React.MutableRefObject<Record<string, boolean>>;
+  color?: string; size?: number; 
+  onTouchDown?: () => void; onTouchUp?: () => void;
 }) {
   return (
     <div
-      onPointerDown={(e) => { e.preventDefault(); keysRef.current[k] = true; }}
-      onPointerUp={(e) => { e.preventDefault(); keysRef.current[k] = false; }}
-      onPointerLeave={(e) => { e.preventDefault(); keysRef.current[k] = false; }}
+      onPointerDown={(e) => { 
+        e.preventDefault(); 
+        if (onTouchDown) onTouchDown();
+        else keysRef.current[k] = true; 
+      }}
+      onPointerUp={(e) => { 
+        e.preventDefault(); 
+        if (onTouchUp) onTouchUp();
+        else keysRef.current[k] = false; 
+      }}
+      onPointerLeave={(e) => { 
+        e.preventDefault(); 
+        if (onTouchUp) onTouchUp();
+        else keysRef.current[k] = false; 
+      }}
       onContextMenu={(e) => e.preventDefault()}
       style={{
-        width: wide ? 68 : 48, height: 50,
-        background: `linear-gradient(180deg, ${color || '#555'}, ${color ? color + 'cc' : '#3a3a3a'})`,
-        border: '2px solid rgba(255,255,255,0.15)',
-        borderBottom: '3px solid rgba(0,0,0,0.4)',
-        borderRadius: 8,
-        display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center',
-        color: '#fff', fontSize: wide ? 10 : 16, fontWeight: 900,
-        cursor: 'pointer', fontFamily: 'monospace',
-        userSelect: 'none', WebkitUserSelect: 'none',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.4)',
-        transition: 'transform 0.05s',
+        width: size, height: size,
+        background: color ? `${color}40` : 'rgba(255, 255, 255, 0.15)', // Fundo translúcido
+        border: `2px solid ${color ? color + '80' : 'rgba(255, 255, 255, 0.3)'}`,
+        borderRadius: '50%',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: 'rgba(255, 255, 255, 0.8)', fontSize: 24, fontWeight: 900,
+        backdropFilter: 'blur(4px)', // Efeito de desfoque
+        WebkitBackdropFilter: 'blur(4px)',
+        cursor: 'pointer', userSelect: 'none', WebkitUserSelect: 'none',
+        boxShadow: '0 4px 10px rgba(0,0,0,0.3)',
+        zIndex: 10000,
+        touchAction: 'none' // Previne zoom do navegador
       }}
     >
-      <span>{label}</span>
-      {hint && <span style={{ fontSize: 8, opacity: 0.6, marginTop: 2 }}>{hint}</span>}
+      {label}
     </div>
   );
 }
+
 
 // ─────────────────────────────────────────────────────
 //  HUD COMPONENTS (Inalterados)
@@ -774,8 +790,8 @@ export default function App() {
   const [gameState, setGameState] = useState<'title' | 'playing' | 'gameover' | 'victory'>('title');
   const [score, setScore] = useState(0);
 
-  // NOVO: Controle de escala da tela para responsividade
   const [scale, setScale] = useState(1);
+  const lastUpTapRef = useRef<number>(0); // REF PARA DUPLO TOQUE DE PULO
 
   const playerRef = useRef<Player>({
     x: 200, y: 360, vx: 0, vy: 0, z: 0, vz: 0,
@@ -793,7 +809,7 @@ export default function App() {
   const davisRef = useRef<Davisaum>({
     x: 100, y: 360, dir: 'right',
     throwTimer: 0, isWalking: false, isThrowing: false, isScared: false,
-    scaredTimer: 0, // Inicia timer
+    scaredTimer: 0,
   });
 
   const keysRef = useRef<Record<string, boolean>>({});
@@ -804,31 +820,27 @@ export default function App() {
   const screenShakeRef = useRef(0);
   const [, tick] = useState(0);
 
-  // NOVO: Efeito para calcular a escala da tela e reagir a mudanças de orientação
   useEffect(() => {
     const handleResize = () => {
-      // O contêiner pai que abriga o jogo e os controles
       const containerW = window.innerWidth;
       const containerH = window.innerHeight;
 
-      // Estima a altura necessária (jogo + controles)
-      const expectedHeight = VIEW_H + 120; // 120px é uma aproximação para os botões
+      // Mudança aqui: Calcula a escala baseada puramente na proporção da tela
+      // para cobrir o dispositivo no modo paisagem sem sobrar espaço em branco
+      const scaleX = containerW / VIEW_W;
+      const scaleY = containerH / VIEW_H;
 
-      // Calcula a escala baseada na largura (garantir que não passe das bordas horizontais)
-      let calcScale = Math.min(containerW / VIEW_W, 1);
-
-      // Se a tela for muito baixa (modo paisagem em celular), reduz a escala pela altura
-      if (expectedHeight * calcScale > containerH) {
-         calcScale = containerH / expectedHeight;
-      }
+      // Usa Math.max se quiser que ocupe a tela toda (pode cortar as pontas)
+      // Usa Math.min se quiser que tudo apareça (pode gerar bordas pretas)
+      // Usaremos Math.max para criar o efeito Fullscreen real Stardew Valley
+      const bestScale = Math.max(scaleX, scaleY);
       
-      // Limite mínimo para não ficar invisível
-      setScale(Math.max(calcScale, 0.3));
+      setScale(bestScale);
     };
 
     window.addEventListener('resize', handleResize);
     window.addEventListener('orientationchange', handleResize);
-    handleResize(); // Chamada inicial
+    handleResize();
 
     return () => {
       window.removeEventListener('resize', handleResize);
@@ -1011,13 +1023,9 @@ export default function App() {
       if (screenShakeRef.current > 0) screenShakeRef.current--;
 
       // ══════════════════════════════════════════════════
-      //  IA DO DAVISAUM (NOVA LÓGICA DE MEDO)
+      //  IA DO DAVISAUM
       // ══════════════════════════════════════════════════
 
-      // 1. O Medo agora é engatilhado EXCLUSIVAMENTE quando o jogador recebe dano.
-      // O trigger está lá embaixo no código de colisão dos inimigos.
-      
-      // 2. Decrementa o timer de medo
       if (dav.scaredTimer > 0) {
         dav.scaredTimer--;
         dav.isScared = true;
@@ -1026,27 +1034,23 @@ export default function App() {
       }
 
       if (dav.isScared) {
-        // Corre pro lado oposto do jogador, de forma caótica.
-        // Ele vai tentar manter uma distância segura e não apenas parar na zona morta.
         const fleeX = dav.x - p.x;
         const fleeY = dav.y - p.y;
         
-        // Adiciono um pouco de aleatoriedade no vetor Y para parecer que ele tá desesperado
         const chaoticFleeY = fleeY + Math.sin(f * 0.1) * 50; 
 
         const fleeDist = Math.sqrt(fleeX * fleeX + chaoticFleeY * chaoticFleeY);
 
-        if (fleeDist < 400) { // Foge até ficar 400px longe
+        if (fleeDist < 400) { 
             dav.x += (fleeX / fleeDist) * DAV_FLEE_SPEED;
             dav.y += (chaoticFleeY / fleeDist) * DAV_FLEE_SPEED * 0.5;
             dav.dir = fleeX > 0 ? 'right' : 'left';
             dav.isWalking = true;
         } else {
-            dav.isWalking = false; // Parou longe o suficiente pra chorar
+            dav.isWalking = false; 
         }
 
       } else {
-        // Seguir o jogador normalmente
         const davTargetX = p.dir === 'right' ? p.x - 90 : p.x + 90;
         const davTargetY = p.y;
         const diffX = davTargetX - dav.x;
@@ -1130,12 +1134,10 @@ export default function App() {
 
               if (d < 250 && p.z < 20 && p.invincible <= 0) {
                 p.hp -= 25; p.hurt = true; p.hurtTimer = 20; p.invincible = 40;
-                // TRIGGER DO MEDO: Suka acerta o herói
                 dav.scaredTimer = DAV_SCARED_FRAMES;
 
                 const pushDir = dx > 0 ? -1 : 1;
                 p.vx = pushDir * 12;
-                // O Davisaum já não precisa ser empurrado artificialmente aqui, a IA dele resolve
                 
                 p.combo = 0; p.comboTimer = 0;
                 spawnParticles(particles, 8, p.x, p.y - 30 - p.z, '#e74c3c', 'hit', 5, 18, 6);
@@ -1155,7 +1157,6 @@ export default function App() {
             if (d < 60 && e.atkCd <= 0 && p.invincible <= 0 && p.z < 10) {
               e.atkCd = 60; e.punchTimer = 15;
               p.hp -= 15; p.hurt = true; p.hurtTimer = 15; p.invincible = 30;
-               // TRIGGER DO MEDO: Suka (ataque corpo-a-corpo) acerta o herói
                dav.scaredTimer = DAV_SCARED_FRAMES;
 
               p.combo = 0; p.comboTimer = 0;
@@ -1178,7 +1179,6 @@ export default function App() {
             e.punchTimer = 15;
             const dmg = e.type === 'fast' ? 8 : 10;
             p.hp -= dmg; p.hurt = true; p.hurtTimer = 15; p.invincible = 30;
-            // TRIGGER DO MEDO: Capanga acerta o herói
             dav.scaredTimer = DAV_SCARED_FRAMES;
 
             p.combo = 0; p.comboTimer = 0;
@@ -1251,9 +1251,7 @@ export default function App() {
         if (!fo.landed) {
           fo.vy += 0.3;
           fo.y += fo.vy;
-          if (fo.vy > 0 && fo.y >= fo.y) { // Esse if tava esquisito, vou arrumar a lógica
-            // Ajuste na lógica de aterrissar. Precisamos de um y_destino ou usar a base.
-             // Simplifiquei: o item só cai.
+          if (fo.vy > 0 && fo.y >= fo.y) { 
             fo.landed = true;
             fo.vy = 0;
           }
@@ -1356,10 +1354,9 @@ export default function App() {
 
   return (
     <div style={{
-      minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: '#080808', fontFamily: '"Press Start 2P", monospace, system-ui',
-      flexDirection: 'column', gap: 12, userSelect: 'none',
-      overflow: 'hidden', // Evitar scroll de página não intencional
+      width: '100vw', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: '#000', fontFamily: '"Press Start 2P", monospace, system-ui',
+      userSelect: 'none', overflow: 'hidden', position: 'relative'
     }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
@@ -1371,176 +1368,118 @@ export default function App() {
         @keyframes itemFloat{0%{transform:translateY(0)}50%{transform:translateY(-6px)}100%{transform:translateY(0)}}
       `}</style>
 
-      <div style={{
-        color: '#f1c40f', fontSize: 12, letterSpacing: 4,
-        textShadow: '0 0 10px rgba(241,196,15,0.3)',
-      }}>
-        ⚡ Wallaçaum — Ameaça NutriControl ⚡
-      </div>
-
       {/* Container Principal Escalonável */}
       <div style={{ 
         transform: `scale(${scale})`, 
-        transformOrigin: 'top center',
-        display: 'flex', 
-        flexDirection: 'column', 
-        alignItems: 'center' 
+        transformOrigin: 'center center',
+        position: 'relative',
+        width: VIEW_W, height: VIEW_H,
+        border: 'none', 
+        imageRendering: 'pixelated',
+        boxShadow: 'inset 0 0 80px rgba(0,0,0,0.5)',
       }}>
+        
+        {/* Renderização do Jogo (Canvas) */}
         <div style={{
-          width: VIEW_W, height: VIEW_H, position: 'relative', overflow: 'hidden',
-          border: '3px solid #333',
-          boxShadow: '0 0 0 1px #111, 0 0 40px rgba(0,0,0,0.8), inset 0 0 80px rgba(0,0,0,0.3)',
-          imageRendering: 'pixelated',
+          position: 'absolute', inset: 0,
+          transform: `translate(${shakeX}px, ${shakeY}px)`,
         }}>
           <div style={{
-            position: 'absolute', inset: -4,
-            transform: `translate(${shakeX}px, ${shakeY}px)`,
-          }}>
-            <div style={{
-              position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-              backgroundImage: `url(${CENARIO_SPRITES.fundo_unico})`,
-              backgroundRepeat: 'repeat-x',
-              backgroundPositionX: -cam,
-              backgroundSize: 'cover',
-              backgroundPositionY: 'bottom',
-            }} />
-
-            {entities.map(ent => {
-              const sx = ent.data.x - cam;
-              if (sx < -120 || sx > VIEW_W + 120) return null;
-
-              if (ent.type === 'player') return (
-                <div key="player" style={{
-                  position: 'absolute',
-                  left: sx - 70,
-                  top: ent.data.y - 155 - (ent.data.z || 0),
-                  zIndex: Math.floor(ent.data.y),
-                }}>
-                  <PixelWallacaum
-                    direction={ent.data.dir}
-                    isWalking={isMoving}
-                    isAttacking={ent.data.attacking}
-                    isBuffa={ent.data.buffing}
-                    isHurt={ent.data.hurt}
-                    jumpZ={ent.data.z || 0}
-                    landSquash={ent.data.landSquash}
-                    combo={ent.data.combo}
-                  />
-                </div>
-              );
-
-              if (ent.type === 'davisaum') return (
-                <div key="davisaum" style={{
-                  position: 'absolute',
-                  left: sx - 30,
-                  top: ent.data.y - 140,
-                  zIndex: Math.floor(ent.data.y),
-                }}>
-                  <PixelDavisaum
-                    direction={ent.data.dir}
-                    isWalking={ent.data.isWalking}
-                    isThrowing={ent.data.isThrowing}
-                    isScared={ent.data.isScared}
-                    frame={f}
-                  />
-                </div>
-              );
-
-              if (ent.type === 'enemy') return (
-                <div key={ent.key} style={{
-                  position: 'absolute',
-                  left: sx - 30,
-                  top: ent.data.y - 100,
-                  zIndex: Math.floor(ent.data.y),
-                }}>
-                  <PixelAgent
-                    type={ent.data.type}
-                    direction={ent.data.dir}
-                    isWalking={ent.data.walking}
-                    punchTimer={ent.data.punchTimer}
-                    stateTimer={ent.data.stateTimer}
-                    frame={f}
-                    isHurt={ent.data.hurt}
-                    hp={ent.data.hp}
-                    maxHp={ent.data.maxHp}
-                  />
-                </div>
-              );
-
-              if (ent.type === 'food') return (
-                <div key={ent.key} style={{
-                  position: 'absolute',
-                  left: sx - FOOD_SIZE / 2,
-                  top: ent.data.y - FOOD_SIZE - 8,
-                  zIndex: Math.floor(ent.data.y) - 1,
-                }}>
-                  <FoodItemComp type={ent.data.type} landed={ent.data.landed} />
-                </div>
-              );
-
-              return null;
-            })}
-
-            <ParticleRenderer particles={particlesRef.current} cam={cam} />
-
-            {textsRef.current.map(ft => (
-              <FloatingText
-                key={ft.id}
-                text={ft.text}
-                x={ft.x - cam - 10}
-                y={ft.y}
-                color={ft.color}
-                size={ft.size}
-              />
-            ))}
-          </div>
-
-          <div style={{
-            position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 9990,
-            background: 'repeating-linear-gradient(0deg, rgba(0,0,0,0.06) 0px, rgba(0,0,0,0.06) 1px, transparent 1px, transparent 3px)',
-            mixBlendMode: 'multiply',
+            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+            backgroundImage: `url(${CENARIO_SPRITES.fundo_unico})`,
+            backgroundRepeat: 'repeat-x',
+            backgroundPositionX: -cam,
+            backgroundSize: 'cover',
+            backgroundPositionY: 'bottom',
           }} />
 
-          <div style={{
-            position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 9991,
-            boxShadow: 'inset 0 0 80px rgba(0,0,0,0.5)',
-          }} />
+          {entities.map(ent => {
+            const sx = ent.data.x - cam;
+            if (sx < -120 || sx > VIEW_W + 120) return null;
 
-          <HpBar hp={p.hp} maxHp={MAX_HP} />
-          <ScoreDisplay score={score} combo={p.combo} />
-          {bossEnemy && <BossHpBar enemy={bossEnemy} />}
+            if (ent.type === 'player') return (
+              <div key="player" style={{ position: 'absolute', left: sx - 70, top: ent.data.y - 155 - (ent.data.z || 0), zIndex: Math.floor(ent.data.y) }}>
+                <PixelWallacaum direction={ent.data.dir} isWalking={isMoving} isAttacking={ent.data.attacking} isBuffa={ent.data.buffing} isHurt={ent.data.hurt} jumpZ={ent.data.z || 0} landSquash={ent.data.landSquash} combo={ent.data.combo} />
+              </div>
+            );
 
-          {gameState === 'title' && <TitleScreen onStart={reset} />}
-          {gameState === 'gameover' && <GameOverScreen score={score} onRetry={reset} />}
-          {gameState === 'victory' && <VictoryScreen score={score} onRetry={reset} />}
+            if (ent.type === 'davisaum') return (
+              <div key="davisaum" style={{ position: 'absolute', left: sx - 30, top: ent.data.y - 140, zIndex: Math.floor(ent.data.y) }}>
+                <PixelDavisaum direction={ent.data.dir} isWalking={ent.data.isWalking} isThrowing={ent.data.isThrowing} isScared={ent.data.isScared} frame={f} />
+              </div>
+            );
+
+            if (ent.type === 'enemy') return (
+              <div key={ent.key} style={{ position: 'absolute', left: sx - 30, top: ent.data.y - 100, zIndex: Math.floor(ent.data.y) }}>
+                <PixelAgent type={ent.data.type} direction={ent.data.dir} isWalking={ent.data.walking} punchTimer={ent.data.punchTimer} stateTimer={ent.data.stateTimer} frame={f} isHurt={ent.data.hurt} hp={ent.data.hp} maxHp={ent.data.maxHp} />
+              </div>
+            );
+
+            if (ent.type === 'food') return (
+              <div key={ent.key} style={{ position: 'absolute', left: sx - FOOD_SIZE / 2, top: ent.data.y - FOOD_SIZE - 8, zIndex: Math.floor(ent.data.y) - 1 }}>
+                <FoodItemComp type={ent.data.type} landed={ent.data.landed} />
+              </div>
+            );
+
+            return null;
+          })}
+
+          <ParticleRenderer particles={particlesRef.current} cam={cam} />
+
+          {textsRef.current.map(ft => (
+            <FloatingText key={ft.id} text={ft.text} x={ft.x - cam - 10} y={ft.y} color={ft.color} size={ft.size} />
+          ))}
         </div>
 
-        {/* CONTROLES */}
-        <div style={{ display: 'flex', gap: 24, marginTop: 16, alignItems: 'center', width: VIEW_W, justifyContent: 'center' }}>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, 56px)', // Botões um pouco maiores no D-Pad
-            gridTemplateRows: 'repeat(3, 56px)',
-            gap: 4,
-          }}>
-            <div />
-            <MobileBtn label="▲" hint="W" k="arrowup" keysRef={keysRef} />
-            <div />
-            <MobileBtn label="◀" hint="A" k="arrowleft" keysRef={keysRef} />
-            <div />
-            <MobileBtn label="▶" hint="D" k="arrowright" keysRef={keysRef} />
-            <div />
-            <MobileBtn label="▼" hint="S" k="arrowdown" keysRef={keysRef} />
-            <div />
-          </div>
+        <HpBar hp={p.hp} maxHp={MAX_HP} />
+        <ScoreDisplay score={score} combo={p.combo} />
+        {bossEnemy && <BossHpBar enemy={bossEnemy} />}
 
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-            {/* Botões de ação mais largos para não errar o dedo */}
-            <MobileBtn label="SOCO" hint="X" k="x" keysRef={keysRef} wide color="#c0392b" />
-            <MobileBtn label="BUFA" hint="C" k="c" keysRef={keysRef} wide color="#27ae60" />
-            <MobileBtn label="PULO" hint="Z/Space" k="z" keysRef={keysRef} wide color="#2980b9" />
-          </div>
+        {gameState === 'title' && <TitleScreen onStart={reset} />}
+        {gameState === 'gameover' && <GameOverScreen score={score} onRetry={reset} />}
+        {gameState === 'victory' && <VictoryScreen score={score} onRetry={reset} />}
+        
+        {/* ========================================= */}
+        {/* CONTROLES OVERLAY (ESTILO STARDEW VALLEY) */}
+        {/* ========================================= */}
+        <div style={{
+          position: 'absolute', bottom: 20, left: 30,
+          display: 'grid', gridTemplateColumns: 'repeat(3, 60px)', gridTemplateRows: 'repeat(3, 60px)',
+          gap: 10, zIndex: 99999,
+          opacity: 0.8,
+        }}>
+          <div />
+          <MobileOverlayBtn 
+            label="▲" k="arrowup" keysRef={keysRef} 
+            onTouchDown={() => {
+              const now = Date.now();
+              if (now - lastUpTapRef.current < 300) { keysRef.current['z'] = true; } 
+              lastUpTapRef.current = now;
+              keysRef.current['arrowup'] = true;
+            }}
+            onTouchUp={() => {
+              keysRef.current['arrowup'] = false;
+              keysRef.current['z'] = false; 
+            }}
+          />
+          <div />
+          <MobileOverlayBtn label="◀" k="arrowleft" keysRef={keysRef} />
+          <div />
+          <MobileOverlayBtn label="▶" k="arrowright" keysRef={keysRef} />
+          <div />
+          <MobileOverlayBtn label="▼" k="arrowdown" keysRef={keysRef} />
+          <div />
         </div>
+
+        <div style={{
+          position: 'absolute', bottom: 40, right: 30,
+          display: 'flex', gap: 20, zIndex: 99999,
+          opacity: 0.8,
+        }}>
+          <MobileOverlayBtn label="🤜" k="x" keysRef={keysRef} color="#c0392b" size={75} />
+          <MobileOverlayBtn label="💨" k="c" keysRef={keysRef} color="#27ae60" size={75} />
+        </div>
+
       </div>
     </div>
   );
